@@ -19,6 +19,7 @@ scene.fog = new THREE.Fog(0x07111f, 18, 65);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.rotation.order = 'YXZ';
+scene.add(camera); // Importante agregar la cámara a la escena para llevar objetos hijos (el arma)
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -55,11 +56,45 @@ const keyStates = {};
 let playerOnFloor = false;
 
 /* =========================================================
+   MODELO 3D DEL ARMA EN MANO Y EFECTOS
+========================================================= */
+const gunGroup = new THREE.Group();
+
+// Materiales del arma
+const metalMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.8 });
+const gripMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 });
+
+// Cañón / Cuerpo principal
+const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.45), metalMat);
+barrel.position.set(0, 0, -0.2);
+
+// Empuñadura / Mango
+const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.18, 0.08), gripMat);
+grip.position.set(0, -0.1, -0.05);
+grip.rotation.x = -0.2;
+
+gunGroup.add(barrel);
+gunGroup.add(grip);
+
+// Posicionar el arma abajo a la derecha de la vista (pantalla)
+gunGroup.position.set(0.28, -0.22, -0.45);
+camera.add(gunGroup); // Unir el arma a la cámara
+
+// Chispazo del cañón (Muzzle Flash)
+const flashLight = new THREE.PointLight(0xffa500, 0, 3);
+flashLight.position.set(0.28, -0.17, -0.7);
+camera.add(flashLight);
+
+// Variables para el efecto de retroceso (Recoil)
+const defaultGunPos = new THREE.Vector3(0.28, -0.22, -0.45);
+let recoilAmount = 0;
+
+/* =========================================================
    MUNDO FÍSICO RAPIER
 ========================================================= */
 const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 const physicalObjects = [];
-const lasers = [];
+const bullets = [];
 
 /* =========================================================
    RAYCASTER PARA BUSCAR EL SUELO
@@ -85,7 +120,6 @@ function createDynamicShape(x, y, z, mass = 4, color = 0x94a3b8) {
     const shape = shapeTypes[Math.floor(Math.random() * shapeTypes.length)];
     
     let geometry, colliderDesc, radius, height, sx, sy, sz;
-    
     const size = THREE.MathUtils.randFloat(0.6, 1.3);
 
     if (shape === 'box') {
@@ -103,7 +137,7 @@ function createDynamicShape(x, y, z, mass = 4, color = 0x94a3b8) {
         sx = size; sy = height; sz = size;
         geometry = new THREE.CylinderGeometry(radius, radius, height, 16);
         colliderDesc = RAPIER.ColliderDesc.cylinder(height / 2, radius);
-    } else { // cone
+    } else {
         radius = size / 2;
         height = size * 1.2;
         sx = size; sy = height; sz = size;
@@ -293,7 +327,6 @@ function controls(deltaTime) {
    COLISIONES DEL JUGADOR CON EL ESCENARIO Y OBJETOS
 ========================================================= */
 function playerCollisions() {
-    // 1. Colisión contra el escenario GLB
     const result = worldOctree.capsuleIntersect(playerCollider);
     playerOnFloor = false;
 
@@ -305,7 +338,6 @@ function playerCollisions() {
         playerCollider.translate(result.normal.multiplyScalar(result.depth));
     }
 
-    // 2. Colisión contra los objetos dinámicos (evita atravesarlos)
     const playerCenter = playerCollider.end.clone().add(playerCollider.start).multiplyScalar(0.5);
     const playerRadius = playerCollider.radius;
 
@@ -318,7 +350,7 @@ function playerCollisions() {
         if (dist < minDistance) {
             const overlap = minDistance - dist;
             const pushDir = playerCenter.clone().sub(objPos).normalize();
-            pushDir.y = 0; // Evitar empuje vertical no deseado
+            pushDir.y = 0;
 
             if (pushDir.lengthSq() > 0) {
                 pushDir.normalize();
@@ -329,7 +361,7 @@ function playerCollisions() {
 }
 
 /* =========================================================
-   EMPUJAR CUBOS CON EL JUGADOR
+   EMPUJAR OBJETOS CON EL JUGADOR
 ========================================================= */
 function pushNearbyObjects() {
     const moving = new THREE.Vector3(playerVelocity.x, 0, playerVelocity.z);
@@ -349,7 +381,7 @@ function pushNearbyObjects() {
 }
 
 /* =========================================================
-   ACTUALIZAR JUGADOR
+   ACTUALIZAR JUGADOR Y EFECTO DE RETROCESO (RECOIL)
 ========================================================= */
 function updatePlayer(deltaTime) {
     let damping = Math.exp(-4 * deltaTime) - 1;
@@ -366,6 +398,16 @@ function updatePlayer(deltaTime) {
     camera.position.copy(playerCollider.end);
     pushNearbyObjects();
 
+    // Actualizar animación de retroceso del arma
+    if (recoilAmount > 0) {
+        recoilAmount = Math.max(0, recoilAmount - deltaTime * 5);
+        gunGroup.position.z = defaultGunPos.z + recoilAmount * 0.15;
+        gunGroup.rotation.x = recoilAmount * 0.2;
+    } else {
+        gunGroup.position.copy(defaultGunPos);
+        gunGroup.rotation.set(0, 0, 0);
+    }
+
     if (camera.position.y < -20) {
         playerCollider.start.set(0, 0.35, 0);
         playerCollider.end.set(0, 1, 0);
@@ -375,69 +417,85 @@ function updatePlayer(deltaTime) {
 }
 
 /* =========================================================
-   LÁSER Y DISPARO
+   SISTEMA DE BALAS Y DISPARO
 ========================================================= */
-function shootLaser() {
+function shootBullet() {
     if (document.pointerLockElement !== renderer.domElement) return;
 
     const direction = new THREE.Vector3();
     camera.getWorldDirection(direction).normalize();
 
-    const geometry = new THREE.CylinderGeometry(0.035, 0.035, 0.9, 10);
-    geometry.rotateX(Math.PI / 2);
-
+    // Crear la bala
+    const geometry = new THREE.SphereGeometry(0.06, 12, 12);
     const material = new THREE.MeshStandardMaterial({
-        color: 0x67e8f9,
-        emissive: 0x22d3ee,
-        emissiveIntensity: 5
+        color: 0xf59e0b,
+        roughness: 0.2,
+        metalness: 0.9,
+        emissive: 0xd97706,
+        emissiveIntensity: 0.8
     });
 
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.copy(camera.position).addScaledVector(direction, 0.8);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
-
+    
+    // Nacer desde el extremo del cañón del arma
+    mesh.position.copy(camera.position).addScaledVector(direction, 0.7);
+    mesh.castShadow = true;
     scene.add(mesh);
-    lasers.push({ mesh: mesh, direction: direction.clone(), speed: 32, life: 1.7 });
+
+    bullets.push({ 
+        mesh: mesh, 
+        direction: direction.clone(), 
+        speed: 80, 
+        life: 1.2 
+    });
+
+    // Activar retroceso de la pistola
+    recoilAmount = 0.8;
+
+    // Activar destello de fuego (Muzzle Flash)
+    flashLight.intensity = 8;
+    setTimeout(() => { flashLight.intensity = 0; }, 40);
 }
 
 function createImpact(position) {
-    const flash = new THREE.PointLight(0x67e8f9, 8, 4, 2);
+    const flash = new THREE.PointLight(0xfba100, 5, 2, 2);
     flash.position.copy(position);
     scene.add(flash);
-    setTimeout(() => scene.remove(flash), 90);
+    setTimeout(() => scene.remove(flash), 60);
 }
 
-function updateLasers(deltaTime) {
+function updateBullets(deltaTime) {
     const meshes = physicalObjects.map(item => item.mesh);
 
-    for (let i = lasers.length - 1; i >= 0; i--) {
-        const laser = lasers[i];
-        const distance = laser.speed * deltaTime;
-        const ray = new THREE.Raycaster(laser.mesh.position, laser.direction, 0, distance + 0.5);
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        const bullet = bullets[i];
+        const distance = bullet.speed * deltaTime;
+        
+        const ray = new THREE.Raycaster(bullet.mesh.position, bullet.direction, 0, distance + 0.2);
         const hit = ray.intersectObjects(meshes, false)[0];
 
         if (hit) {
             const item = physicalObjects.find(entry => entry.mesh === hit.object);
             if (item) {
-                item.body.applyImpulse({
-                    x: laser.direction.x * 9,
-                    y: laser.direction.y * 9 + 1.2,
-                    z: laser.direction.z * 9
-                }, true);
+                item.body.applyImpulseAtPoint({
+                    x: bullet.direction.x * 15,
+                    y: bullet.direction.y * 15 + 2,
+                    z: bullet.direction.z * 15
+                }, hit.point, true);
             }
 
             createImpact(hit.point);
-            scene.remove(laser.mesh);
-            lasers.splice(i, 1);
+            scene.remove(bullet.mesh);
+            bullets.splice(i, 1);
             continue;
         }
 
-        laser.mesh.position.addScaledVector(laser.direction, distance);
-        laser.life -= deltaTime;
+        bullet.mesh.position.addScaledVector(bullet.direction, distance);
+        bullet.life -= deltaTime;
 
-        if (laser.life <= 0) {
-            scene.remove(laser.mesh);
-            lasers.splice(i, 1);
+        if (bullet.life <= 0) {
+            scene.remove(bullet.mesh);
+            bullets.splice(i, 1);
         }
     }
 }
@@ -474,7 +532,7 @@ document.addEventListener('mousemove', (event) => {
 });
 
 document.addEventListener('mousedown', (event) => {
-    if (event.button === 0) shootLaser();
+    if (event.button === 0) shootBullet();
 });
 
 /* =========================================================
@@ -490,7 +548,7 @@ function animate() {
     physicsWorld.step();
     syncPhysics();
 
-    updateLasers(delta);
+    updateBullets(delta);
     renderer.render(scene, camera);
 }
 

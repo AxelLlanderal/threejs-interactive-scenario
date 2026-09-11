@@ -19,7 +19,7 @@ scene.fog = new THREE.Fog(0x07111f, 18, 65);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.rotation.order = 'YXZ';
-scene.add(camera); // Importante agregar la cámara a la escena para llevar objetos hijos (el arma)
+scene.add(camera);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -56,41 +56,162 @@ const keyStates = {};
 let playerOnFloor = false;
 
 /* =========================================================
-   MODELO 3D DEL ARMA EN MANO Y EFECTOS
+   SISTEMA DE ARMAS Y MODELADO 3D
 ========================================================= */
-const gunGroup = new THREE.Group();
+const gunContainer = new THREE.Group();
+gunContainer.position.set(0.28, -0.22, -0.45);
+camera.add(gunContainer);
 
-// Materiales del arma
-const metalMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.8 });
-const gripMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 });
-
-// Cañón / Cuerpo principal
-const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.45), metalMat);
-barrel.position.set(0, 0, -0.2);
-
-// Empuñadura / Mango
-const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.18, 0.08), gripMat);
-grip.position.set(0, -0.1, -0.05);
-grip.rotation.x = -0.2;
-
-gunGroup.add(barrel);
-gunGroup.add(grip);
-
-// Posicionar el arma abajo a la derecha de la vista (pantalla)
-gunGroup.position.set(0.28, -0.22, -0.45);
-camera.add(gunGroup); // Unir el arma a la cámara
-
-// Chispazo del cañón (Muzzle Flash)
-const flashLight = new THREE.PointLight(0xffa500, 0, 3);
+const flashLight = new THREE.PointLight(0xffa500, 0, 4);
 flashLight.position.set(0.28, -0.17, -0.7);
 camera.add(flashLight);
 
-// Variables para el efecto de retroceso (Recoil)
-const defaultGunPos = new THREE.Vector3(0.28, -0.22, -0.45);
+// Materiales compartidos
+const darkMetal = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.8 });
+const lightMetal = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.2, metalness: 0.9 });
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.7 });
+const gripMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
+
+// DEFINICIÓN Y MODELADO DE LAS 5 ARMAS
+const weapons = {
+    1: {
+        name: 'Pistola',
+        force: 15,
+        speed: 80,
+        cooldown: 0.25,
+        bulletsPerShot: 1,
+        spread: 0.01,
+        recoilForce: 0.6,
+        color: 0xf59e0b,
+        mesh: createPistolMesh()
+    },
+    2: {
+        name: 'Escopeta',
+        force: 22,
+        speed: 65,
+        cooldown: 0.8,
+        bulletsPerShot: 8,
+        spread: 0.09,
+        recoilForce: 1.6,
+        color: 0xeab308,
+        mesh: createShotgunMesh()
+    },
+    3: {
+        name: 'Subfusil (SMG)',
+        force: 8,
+        speed: 85,
+        cooldown: 0.09,
+        bulletsPerShot: 1,
+        spread: 0.035,
+        recoilForce: 0.3,
+        color: 0x38bdf8,
+        mesh: createSMGMesh()
+    },
+    4: {
+        name: 'Sniper',
+        force: 85,
+        speed: 150,
+        cooldown: 1.2,
+        bulletsPerShot: 1,
+        spread: 0.001,
+        recoilForce: 2.2,
+        color: 0xef4444,
+        mesh: createSniperMesh()
+    },
+    5: {
+        name: 'Lanzagranadas',
+        force: 120,
+        speed: 40,
+        cooldown: 1.0,
+        bulletsPerShot: 1,
+        spread: 0.01,
+        recoilForce: 2.0,
+        color: 0x22c55e,
+        mesh: createLauncherMesh()
+    }
+};
+
+let currentWeaponKey = 1;
+let lastShotTime = 0;
 let recoilAmount = 0;
+const defaultGunPos = new THREE.Vector3(0.28, -0.22, -0.45);
+
+// Funciones creadoras de modelos 3D
+function createPistolMesh() {
+    const group = new THREE.Group();
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.4), darkMetal);
+    barrel.position.set(0, 0, -0.15);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.18, 0.08), gripMat);
+    grip.position.set(0, -0.1, -0.02);
+    grip.rotation.x = -0.2;
+    group.add(barrel, grip);
+    return group;
+}
+
+function createShotgunMesh() {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.4), darkMetal);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.6, 12), lightMetal);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 0.02, -0.35);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.3), woodMat);
+    stock.position.set(0, -0.04, 0.15);
+    group.add(body, barrel, stock);
+    return group;
+}
+
+function createSMGMesh() {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.14, 0.35), darkMetal);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.25, 0.07), lightMetal);
+    mag.position.set(0, -0.15, -0.05);
+    mag.rotation.x = 0.2;
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.25, 10), lightMetal);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 0.03, -0.28);
+    group.add(body, mag, barrel);
+    return group;
+}
+
+function createSniperMesh() {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.5), darkMetal);
+    const longBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.85, 12), lightMetal);
+    longBarrel.rotation.x = Math.PI / 2;
+    longBarrel.position.set(0, 0.02, -0.5);
+    const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.25, 12), darkMetal);
+    scope.rotation.x = Math.PI / 2;
+    scope.position.set(0, 0.09, -0.1);
+    group.add(body, longBarrel, scope);
+    return group;
+}
+
+function createLauncherMesh() {
+    const group = new THREE.Group();
+    const bigBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.65, 16), darkMetal);
+    bigBarrel.rotation.x = Math.PI / 2;
+    bigBarrel.position.set(0, 0.02, -0.25);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.18, 0.08), gripMat);
+    grip.position.set(0, -0.12, -0.05);
+    group.add(bigBarrel, grip);
+    return group;
+}
+
+// Inicializar visibilidad de armas
+Object.keys(weapons).forEach(key => {
+    gunContainer.add(weapons[key].mesh);
+    weapons[key].mesh.visible = (key == currentWeaponKey);
+});
+
+function switchWeapon(key) {
+    if (!weapons[key] || key == currentWeaponKey) return;
+    weapons[currentWeaponKey].mesh.visible = false;
+    currentWeaponKey = key;
+    weapons[currentWeaponKey].mesh.visible = true;
+}
 
 /* =========================================================
-   MUNDO FÍSICO RAPIER
+   MUNDO FÍSICO RAPIER Y BALAS
 ========================================================= */
 const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 const physicalObjects = [];
@@ -381,7 +502,7 @@ function pushNearbyObjects() {
 }
 
 /* =========================================================
-   ACTUALIZAR JUGADOR Y EFECTO DE RETROCESO (RECOIL)
+   ACTUALIZAR JUGADOR Y RETROCESO DE ARMA
 ========================================================= */
 function updatePlayer(deltaTime) {
     let damping = Math.exp(-4 * deltaTime) - 1;
@@ -398,14 +519,14 @@ function updatePlayer(deltaTime) {
     camera.position.copy(playerCollider.end);
     pushNearbyObjects();
 
-    // Actualizar animación de retroceso del arma
+    // Animación de recoil del arma actual
     if (recoilAmount > 0) {
-        recoilAmount = Math.max(0, recoilAmount - deltaTime * 5);
-        gunGroup.position.z = defaultGunPos.z + recoilAmount * 0.15;
-        gunGroup.rotation.x = recoilAmount * 0.2;
+        recoilAmount = Math.max(0, recoilAmount - deltaTime * 6);
+        gunContainer.position.z = defaultGunPos.z + recoilAmount * 0.15;
+        gunContainer.rotation.x = recoilAmount * 0.25;
     } else {
-        gunGroup.position.copy(defaultGunPos);
-        gunGroup.rotation.set(0, 0, 0);
+        gunContainer.position.copy(defaultGunPos);
+        gunContainer.rotation.set(0, 0, 0);
     }
 
     if (camera.position.y < -20) {
@@ -417,51 +538,65 @@ function updatePlayer(deltaTime) {
 }
 
 /* =========================================================
-   SISTEMA DE BALAS Y DISPARO
+   SISTEMA DE DISPARO DINÁMICO POR ARMA
 ========================================================= */
-function shootBullet() {
+function shoot() {
     if (document.pointerLockElement !== renderer.domElement) return;
 
-    const direction = new THREE.Vector3();
-    camera.getWorldDirection(direction).normalize();
+    const now = clock.getElapsedTime();
+    const weapon = weapons[currentWeaponKey];
 
-    // Crear la bala
-    const geometry = new THREE.SphereGeometry(0.06, 12, 12);
-    const material = new THREE.MeshStandardMaterial({
-        color: 0xf59e0b,
-        roughness: 0.2,
-        metalness: 0.9,
-        emissive: 0xd97706,
-        emissiveIntensity: 0.8
-    });
+    if (now - lastShotTime < weapon.cooldown) return;
+    lastShotTime = now;
 
-    const mesh = new THREE.Mesh(geometry, material);
-    
-    // Nacer desde el extremo del cañón del arma
-    mesh.position.copy(camera.position).addScaledVector(direction, 0.7);
-    mesh.castShadow = true;
-    scene.add(mesh);
+    const baseDirection = new THREE.Vector3();
+    camera.getWorldDirection(baseDirection).normalize();
 
-    bullets.push({ 
-        mesh: mesh, 
-        direction: direction.clone(), 
-        speed: 80, 
-        life: 1.2 
-    });
+    for (let i = 0; i < weapon.bulletsPerShot; i++) {
+        // Calcular dispersión
+        const spreadDir = baseDirection.clone().add(new THREE.Vector3(
+            (Math.random() - 0.5) * weapon.spread,
+            (Math.random() - 0.5) * weapon.spread,
+            (Math.random() - 0.5) * weapon.spread
+        )).normalize();
 
-    // Activar retroceso de la pistola
-    recoilAmount = 0.8;
+        const bulletRadius = currentWeaponKey == 5 ? 0.18 : 0.06;
+        const geometry = new THREE.SphereGeometry(bulletRadius, 12, 12);
+        const material = new THREE.MeshStandardMaterial({
+            color: weapon.color,
+            roughness: 0.2,
+            metalness: 0.8,
+            emissive: weapon.color,
+            emissiveIntensity: 0.6
+        });
 
-    // Activar destello de fuego (Muzzle Flash)
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.copy(camera.position).addScaledVector(spreadDir, 0.7);
+        mesh.castShadow = true;
+        scene.add(mesh);
+
+        bullets.push({
+            mesh: mesh,
+            direction: spreadDir,
+            speed: weapon.speed,
+            force: weapon.force,
+            life: 1.2
+        });
+    }
+
+    recoilAmount = weapon.recoilForce;
+
+    // Destello de cañón
+    flashLight.color.setHex(weapon.color);
     flashLight.intensity = 8;
     setTimeout(() => { flashLight.intensity = 0; }, 40);
 }
 
-function createImpact(position) {
-    const flash = new THREE.PointLight(0xfba100, 5, 2, 2);
+function createImpact(position, color) {
+    const flash = new THREE.PointLight(color, 6, 3, 2);
     flash.position.copy(position);
     scene.add(flash);
-    setTimeout(() => scene.remove(flash), 60);
+    setTimeout(() => scene.remove(flash), 70);
 }
 
 function updateBullets(deltaTime) {
@@ -470,7 +605,7 @@ function updateBullets(deltaTime) {
     for (let i = bullets.length - 1; i >= 0; i--) {
         const bullet = bullets[i];
         const distance = bullet.speed * deltaTime;
-        
+
         const ray = new THREE.Raycaster(bullet.mesh.position, bullet.direction, 0, distance + 0.2);
         const hit = ray.intersectObjects(meshes, false)[0];
 
@@ -478,13 +613,13 @@ function updateBullets(deltaTime) {
             const item = physicalObjects.find(entry => entry.mesh === hit.object);
             if (item) {
                 item.body.applyImpulseAtPoint({
-                    x: bullet.direction.x * 15,
-                    y: bullet.direction.y * 15 + 2,
-                    z: bullet.direction.z * 15
+                    x: bullet.direction.x * bullet.force,
+                    y: bullet.direction.y * bullet.force + (bullet.force * 0.1),
+                    z: bullet.direction.z * bullet.force
                 }, hit.point, true);
             }
 
-            createImpact(hit.point);
+            createImpact(hit.point, bullet.mesh.material.color.getHex());
             scene.remove(bullet.mesh);
             bullets.splice(i, 1);
             continue;
@@ -515,7 +650,16 @@ function syncPhysics() {
 /* =========================================================
    EVENTOS
 ========================================================= */
-document.addEventListener('keydown', (event) => { keyStates[event.code] = true; });
+document.addEventListener('keydown', (event) => {
+    keyStates[event.code] = true;
+
+    // Teclas 1 al 5 para cambio de arma
+    if (['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].includes(event.code)) {
+        const num = event.code.replace('Digit', '');
+        switchWeapon(parseInt(num));
+    }
+});
+
 document.addEventListener('keyup', (event) => { keyStates[event.code] = false; });
 
 renderer.domElement.addEventListener('click', () => {
@@ -531,8 +675,9 @@ document.addEventListener('mousemove', (event) => {
     camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x, -Math.PI / 2, Math.PI / 2);
 });
 
+// Disparo continuo/automático manteniéndolo presionado o único por clic
 document.addEventListener('mousedown', (event) => {
-    if (event.button === 0) shootBullet();
+    if (event.button === 0) shoot();
 });
 
 /* =========================================================
@@ -543,6 +688,11 @@ function animate() {
 
     controls(delta);
     updatePlayer(delta);
+
+    // Permite disparo automático para armas de cadencia alta (ej. SMG)
+    if (keyStates['Mouse0'] || (keyStates['KeyE'])) {
+        shoot();
+    }
 
     physicsWorld.timestep = delta;
     physicsWorld.step();

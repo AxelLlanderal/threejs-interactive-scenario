@@ -4,10 +4,48 @@ import { Octree } from 'three/addons/math/Octree.js';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import RAPIER from 'https://cdn.skypack.dev/@dimforge/rapier3d-compat';
 
-/* =========================================================
-   INICIAR RAPIER
-========================================================= */
 await RAPIER.init();
+
+/* =========================================================
+   INTERFAZ DE USUARIO (HUD) - ESQUINA INFERIOR IZQUIERDA
+========================================================= */
+const hudContainer = document.createElement('div');
+hudContainer.style.position = 'absolute';
+hudContainer.style.bottom = '20px';
+hudContainer.style.left = '20px';
+hudContainer.style.color = '#ffffff';
+hudContainer.style.fontFamily = 'Consolas, monospace, sans-serif';
+hudContainer.style.fontSize = '18px';
+hudContainer.style.fontWeight = 'bold';
+hudContainer.style.background = 'rgba(15, 23, 42, 0.75)';
+hudContainer.style.padding = '12px 20px';
+hudContainer.style.borderRadius = '8px';
+hudContainer.style.border = '2px solid rgba(255, 255, 255, 0.1)';
+hudContainer.style.boxShadow = '0 4px 12px rgba(0,0,0,0.5)';
+hudContainer.style.pointerEvents = 'none';
+hudContainer.style.zIndex = '100';
+hudContainer.innerHTML = `
+    <div style="margin-bottom: 4px;">VIDA: <span id="health-val" style="color: #4ade80;">100</span></div>
+    <div style="margin-bottom: 4px;">KILLS: <span id="kills-val" style="color: #facc15;">0</span></div>
+    <div>MUERTES: <span id="deaths-val" style="color: #ef4444;">0</span></div>
+`;
+document.body.appendChild(hudContainer);
+
+let killCount = 0;
+let deathCount = 0;
+let playerHealth = 100;
+
+function updateHUD() {
+    const hpElem = document.getElementById('health-val');
+    const killElem = document.getElementById('kills-val');
+    const deathElem = document.getElementById('deaths-val');
+    if (hpElem) {
+        hpElem.innerText = playerHealth;
+        hpElem.style.color = playerHealth > 30 ? '#4ade80' : '#ef4444';
+    }
+    if (killElem) killElem.innerText = killCount;
+    if (deathElem) deathElem.innerText = deathCount;
+}
 
 /* =========================================================
    ESCENA Y RENDERER
@@ -28,9 +66,6 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 container.appendChild(renderer.domElement);
 
-/* =========================================================
-   LUCES Y TIMER
-========================================================= */
 scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x182030, 1.8));
 
 const sun = new THREE.DirectionalLight(0xffffff, 3);
@@ -56,7 +91,7 @@ const keyStates = {};
 let playerOnFloor = false;
 
 /* =========================================================
-   SISTEMA DE ARMAS Y MODELADO 3D
+   ARMAS JUGADOR
 ========================================================= */
 const gunContainer = new THREE.Group();
 gunContainer.position.set(0.28, -0.22, -0.45);
@@ -66,69 +101,17 @@ const flashLight = new THREE.PointLight(0xffa500, 0, 4);
 flashLight.position.set(0.28, -0.17, -0.7);
 camera.add(flashLight);
 
-// Materiales compartidos
 const darkMetal = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.8 });
 const lightMetal = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.2, metalness: 0.9 });
 const woodMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.7 });
 const gripMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
 
-// DEFINICIÓN Y MODELADO DE LAS 5 ARMAS
 const weapons = {
-    1: {
-        name: 'Pistola',
-        force: 15,
-        speed: 80,
-        cooldown: 0.25,
-        bulletsPerShot: 1,
-        spread: 0.01,
-        recoilForce: 0.6,
-        color: 0xf59e0b,
-        mesh: createPistolMesh()
-    },
-    2: {
-        name: 'Escopeta',
-        force: 22,
-        speed: 65,
-        cooldown: 0.8,
-        bulletsPerShot: 8,
-        spread: 0.09,
-        recoilForce: 1.6,
-        color: 0xeab308,
-        mesh: createShotgunMesh()
-    },
-    3: {
-        name: 'Subfusil (SMG)',
-        force: 8,
-        speed: 85,
-        cooldown: 0.09,
-        bulletsPerShot: 1,
-        spread: 0.035,
-        recoilForce: 0.3,
-        color: 0x38bdf8,
-        mesh: createSMGMesh()
-    },
-    4: {
-        name: 'Sniper',
-        force: 85,
-        speed: 150,
-        cooldown: 1.2,
-        bulletsPerShot: 1,
-        spread: 0.001,
-        recoilForce: 2.2,
-        color: 0xef4444,
-        mesh: createSniperMesh()
-    },
-    5: {
-        name: 'Lanzagranadas',
-        force: 120,
-        speed: 40,
-        cooldown: 1.0,
-        bulletsPerShot: 1,
-        spread: 0.01,
-        recoilForce: 2.0,
-        color: 0x22c55e,
-        mesh: createLauncherMesh()
-    }
+    1: { name: 'Pistola', force: 15, damage: 25, speed: 80, cooldown: 0.25, bulletsPerShot: 1, spread: 0.01, recoilForce: 0.6, color: 0xf59e0b, mesh: createPistolMesh() },
+    2: { name: 'Escopeta', force: 22, damage: 12, speed: 65, cooldown: 0.8, bulletsPerShot: 8, spread: 0.09, recoilForce: 1.6, color: 0xeab308, mesh: createShotgunMesh() },
+    3: { name: 'Subfusil', force: 8, damage: 10, speed: 85, cooldown: 0.09, bulletsPerShot: 1, spread: 0.035, recoilForce: 0.3, color: 0x38bdf8, mesh: createSMGMesh() },
+    4: { name: 'Sniper', force: 85, damage: 100, speed: 150, cooldown: 1.2, bulletsPerShot: 1, spread: 0.001, recoilForce: 2.2, color: 0xef4444, mesh: createSniperMesh() },
+    5: { name: 'Lanzagranadas', force: 120, damage: 80, speed: 40, cooldown: 1.0, bulletsPerShot: 1, spread: 0.01, recoilForce: 2.0, color: 0x22c55e, mesh: createLauncherMesh() }
 };
 
 let currentWeaponKey = 1;
@@ -136,7 +119,6 @@ let lastShotTime = 0;
 let recoilAmount = 0;
 const defaultGunPos = new THREE.Vector3(0.28, -0.22, -0.45);
 
-// Funciones creadoras de modelos 3D
 function createPistolMesh() {
     const group = new THREE.Group();
     const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.4), darkMetal);
@@ -197,7 +179,6 @@ function createLauncherMesh() {
     return group;
 }
 
-// Inicializar visibilidad de armas
 Object.keys(weapons).forEach(key => {
     gunContainer.add(weapons[key].mesh);
     weapons[key].mesh.visible = (key == currentWeaponKey);
@@ -211,31 +192,170 @@ function switchWeapon(key) {
 }
 
 /* =========================================================
-   MUNDO FÍSICO RAPIER Y BALAS
+   FÍSICAS Y ARRAYS
 ========================================================= */
 const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 const physicalObjects = [];
-const bullets = [];
+const playerBullets = [];
+const enemyBullets = [];
 
 /* =========================================================
-   RAYCASTER PARA BUSCAR EL SUELO
+   ENEMIGO Y MOVIMIENTO
+========================================================= */
+let enemy = null;
+
+function createEnemy(x, y, z) {
+    const group = new THREE.Group();
+
+    const bodyGeo = new THREE.CapsuleGeometry(0.4, 1.2, 8, 16);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.4 });
+    const mesh = new THREE.Mesh(bodyGeo, bodyMat);
+    mesh.castShadow = true;
+    group.add(mesh);
+
+    const eyeGeo = new THREE.BoxGeometry(0.3, 0.12, 0.2);
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xef4444, emissiveIntensity: 2 });
+    const eye = new THREE.Mesh(eyeGeo, eyeMat);
+    eye.position.set(0, 0.4, -0.3);
+    group.add(eye);
+
+    group.position.set(x, y, z);
+    scene.add(group);
+
+    const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y, z).lockRotations();
+    const body = physicsWorld.createRigidBody(bodyDesc);
+    const colliderDesc = RAPIER.ColliderDesc.capsule(0.6, 0.4).setFriction(0.8);
+    physicsWorld.createCollider(colliderDesc, body);
+
+    enemy = {
+        mesh: group,
+        body: body,
+        health: 100,
+        lastShot: 0,
+        fireRate: 1.1,
+        alive: true,
+        moveSpeed: 3.5
+    };
+}
+
+function updateEnemy(now, delta) {
+    if (!enemy || !enemy.alive) return;
+
+    const pos = enemy.body.translation();
+    enemy.mesh.position.set(pos.x, pos.y, pos.z);
+
+    const playerPos = camera.position.clone();
+    playerPos.y = pos.y;
+    enemy.mesh.lookAt(playerPos);
+
+    const enemyPos = new THREE.Vector3(pos.x, pos.y, pos.z);
+    const distToPlayer = enemyPos.distanceTo(camera.position);
+
+    // LÓGICA DE MOVIMIENTO DEL ENEMIGO
+    if (distToPlayer > 3 && distToPlayer < 30) {
+        const moveDir = camera.position.clone().sub(enemyPos);
+        moveDir.y = 0;
+        moveDir.normalize();
+
+        const currentVel = enemy.body.linvel();
+        enemy.body.setLinvel({
+            x: moveDir.x * enemy.moveSpeed,
+            y: currentVel.y,
+            z: moveDir.z * enemy.moveSpeed
+        }, true);
+    }
+
+    // DISPARAR AL JUGADOR
+    const muzzlePos = new THREE.Vector3(pos.x, pos.y + 0.4, pos.z);
+    if (distToPlayer < 25 && now - enemy.lastShot > enemy.fireRate) {
+        enemy.lastShot = now;
+        shootEnemyBullet(muzzlePos);
+    }
+}
+
+function shootEnemyBullet(fromPosition) {
+    const direction = camera.position.clone().sub(fromPosition).normalize();
+    direction.x += (Math.random() - 0.5) * 0.08;
+    direction.y += (Math.random() - 0.5) * 0.08;
+    direction.z += (Math.random() - 0.5) * 0.08;
+    direction.normalize();
+
+    const geometry = new THREE.SphereGeometry(0.12, 10, 10);
+    const material = new THREE.MeshStandardMaterial({
+        color: 0xef4444,
+        emissive: 0xd97706,
+        emissiveIntensity: 2
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(fromPosition);
+    scene.add(mesh);
+
+    enemyBullets.push({
+        mesh: mesh,
+        direction: direction,
+        speed: 35,
+        life: 2.0
+    });
+}
+
+function damageEnemy(amount) {
+    if (!enemy || !enemy.alive) return;
+
+    enemy.health -= amount;
+
+    enemy.mesh.children[0].material.color.setHex(0xffffff);
+    setTimeout(() => {
+        if (enemy && enemy.alive) enemy.mesh.children[0].material.color.setHex(0xd97706);
+    }, 100);
+
+    if (enemy.health <= 0) {
+        enemy.alive = false;
+        killCount++;
+        updateHUD();
+
+        enemy.mesh.visible = false;
+        enemy.body.setTranslation({ x: 0, y: -100, z: 0 }, true);
+
+        setTimeout(() => {
+            if (enemy) {
+                enemy.health = 100;
+                enemy.alive = true;
+                enemy.mesh.visible = true;
+                enemy.body.setTranslation({ x: 0, y: 4, z: -10 }, true);
+                enemy.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+            }
+        }, 3000);
+    }
+}
+
+function damagePlayer(amount) {
+    playerHealth = Math.max(0, playerHealth - amount);
+    updateHUD();
+
+    if (playerHealth <= 0) {
+        deathCount++;
+        playerHealth = 100;
+        updateHUD();
+        playerCollider.start.set(0, 0.35, 0);
+        playerCollider.end.set(0, 1, 0);
+        playerVelocity.set(0, 0, 0);
+    }
+}
+
+/* =========================================================
+   ESCENARIO Y BLOQUES
 ========================================================= */
 const groundRaycaster = new THREE.Raycaster();
 const rayOrigin = new THREE.Vector3();
 const downDirection = new THREE.Vector3(0, -1, 0);
 let scenarioMeshes = [];
 
-/* =========================================================
-   COLORES ALEATORIOS
-========================================================= */
 const cubeColors = [0x22d3ee, 0x38bdf8, 0xa78bfa, 0xf472b6, 0xfacc15, 0x4ade80, 0xfb923c, 0xe2e8f0];
 function getRandomColor() {
     return cubeColors[Math.floor(Math.random() * cubeColors.length)];
 }
 
-/* =========================================================
-   CREAR OBJETOS CON DIVERSAS FORMAS DINÁMICAS
-========================================================= */
 function createDynamicShape(x, y, z, mass = 4, color = 0x94a3b8) {
     const shapeTypes = ['box', 'sphere', 'cylinder', 'cone'];
     const shape = shapeTypes[Math.floor(Math.random() * shapeTypes.length)];
@@ -266,12 +386,7 @@ function createDynamicShape(x, y, z, mass = 4, color = 0x94a3b8) {
         colliderDesc = RAPIER.ColliderDesc.cone(height / 2, radius);
     }
 
-    const material = new THREE.MeshStandardMaterial({
-        color: color,
-        roughness: 0.65,
-        metalness: 0.08
-    });
-
+    const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.65, metalness: 0.08 });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
     mesh.castShadow = true;
@@ -286,47 +401,29 @@ function createDynamicShape(x, y, z, mass = 4, color = 0x94a3b8) {
     colliderDesc.setDensity(mass / volume).setFriction(0.8).setRestitution(0.05);
     physicsWorld.createCollider(colliderDesc, body);
 
-    physicalObjects.push({
-        mesh: mesh,
-        body: body,
-        size: new THREE.Vector3(sx, sy, sz),
-        radius: radius || size / 2
-    });
-
+    physicalObjects.push({ mesh, body, size: new THREE.Vector3(sx, sy, sz), radius: radius || size / 2 });
     return { mesh, body };
 }
 
-/* =========================================================
-   BUSCAR ALTURA DEL SUELO
-========================================================= */
 function findGroundHeight(x, z) {
     rayOrigin.set(x, 50, z);
     groundRaycaster.set(rayOrigin, downDirection);
     groundRaycaster.far = 100;
-
     const intersections = groundRaycaster.intersectObjects(scenarioMeshes, false);
     if (intersections.length === 0) return null;
     return intersections[0].point.y;
 }
 
-/* =========================================================
-   COMPROBAR POSICIÓN DISPONIBLE
-========================================================= */
 function isPositionAvailable(x, y, z, size) {
     const margin = 0.3;
     for (const item of physicalObjects) {
         const p = item.body.translation();
         const dist = Math.hypot(x - p.x, y - p.y, z - p.z);
-        if (dist < (size / 2 + item.size.x / 2 + margin)) {
-            return false;
-        }
+        if (dist < (size / 2 + item.size.x / 2 + margin)) return false;
     }
     return true;
 }
 
-/* =========================================================
-   GENERAR OBJETOS ALEATORIOS
-========================================================= */
 function generateRandomBoxes(amount = 15) {
     let created = 0;
     let attempts = 0;
@@ -349,9 +446,6 @@ function generateRandomBoxes(amount = 15) {
     }
 }
 
-/* =========================================================
-   COLLISION RAPIER DEL ESCENARIO
-========================================================= */
 function createRapierColliderFromMesh(mesh) {
     const geometry = mesh.geometry;
     if (!geometry || !geometry.attributes.position) return;
@@ -389,9 +483,6 @@ function createRapierColliderFromMesh(mesh) {
     physicsWorld.createCollider(colliderDescription);
 }
 
-/* =========================================================
-   CARGAR ESCENARIO
-========================================================= */
 const loader = new GLTFLoader();
 loader.load('./assets/models/collision-world.glb', (gltf) => {
     const model = gltf.scene;
@@ -416,10 +507,11 @@ loader.load('./assets/models/collision-world.glb', (gltf) => {
     });
 
     generateRandomBoxes(15);
+    createEnemy(0, 4, -8);
 });
 
 /* =========================================================
-   CONTROLES Y DIRECCIÓN DEL JUGADOR
+   CONTROLES
 ========================================================= */
 function getForwardVector() {
     camera.getWorldDirection(playerDirection);
@@ -444,9 +536,6 @@ function controls(deltaTime) {
     if (playerOnFloor && keyStates.Space) playerVelocity.y = 7;
 }
 
-/* =========================================================
-   COLISIONES DEL JUGADOR CON EL ESCENARIO Y OBJETOS
-========================================================= */
 function playerCollisions() {
     const result = worldOctree.capsuleIntersect(playerCollider);
     playerOnFloor = false;
@@ -481,9 +570,6 @@ function playerCollisions() {
     }
 }
 
-/* =========================================================
-   EMPUJAR OBJETOS CON EL JUGADOR
-========================================================= */
 function pushNearbyObjects() {
     const moving = new THREE.Vector3(playerVelocity.x, 0, playerVelocity.z);
     if (moving.lengthSq() < 0.04) return;
@@ -501,9 +587,6 @@ function pushNearbyObjects() {
     }
 }
 
-/* =========================================================
-   ACTUALIZAR JUGADOR Y RETROCESO DE ARMA
-========================================================= */
 function updatePlayer(deltaTime) {
     let damping = Math.exp(-4 * deltaTime) - 1;
     if (!playerOnFloor) {
@@ -519,7 +602,6 @@ function updatePlayer(deltaTime) {
     camera.position.copy(playerCollider.end);
     pushNearbyObjects();
 
-    // Animación de recoil del arma actual
     if (recoilAmount > 0) {
         recoilAmount = Math.max(0, recoilAmount - deltaTime * 6);
         gunContainer.position.z = defaultGunPos.z + recoilAmount * 0.15;
@@ -538,7 +620,7 @@ function updatePlayer(deltaTime) {
 }
 
 /* =========================================================
-   SISTEMA DE DISPARO DINÁMICO POR ARMA
+   DISPAROS Y SISTEMA DE BALAS
 ========================================================= */
 function shoot() {
     if (document.pointerLockElement !== renderer.domElement) return;
@@ -553,7 +635,6 @@ function shoot() {
     camera.getWorldDirection(baseDirection).normalize();
 
     for (let i = 0; i < weapon.bulletsPerShot; i++) {
-        // Calcular dispersión
         const spreadDir = baseDirection.clone().add(new THREE.Vector3(
             (Math.random() - 0.5) * weapon.spread,
             (Math.random() - 0.5) * weapon.spread,
@@ -575,18 +656,18 @@ function shoot() {
         mesh.castShadow = true;
         scene.add(mesh);
 
-        bullets.push({
+        playerBullets.push({
             mesh: mesh,
             direction: spreadDir,
             speed: weapon.speed,
             force: weapon.force,
+            damage: weapon.damage,
             life: 1.2
         });
     }
 
     recoilAmount = weapon.recoilForce;
 
-    // Destello de cañón
     flashLight.color.setHex(weapon.color);
     flashLight.intensity = 8;
     setTimeout(() => { flashLight.intensity = 0; }, 40);
@@ -600,28 +681,41 @@ function createImpact(position, color) {
 }
 
 function updateBullets(deltaTime) {
-    const meshes = physicalObjects.map(item => item.mesh);
+    const dynamicMeshes = physicalObjects.map(item => item.mesh);
+    const allColliders = [...dynamicMeshes, ...scenarioMeshes];
+    
+    if (enemy && enemy.alive) allColliders.push(enemy.mesh.children[0]);
 
-    for (let i = bullets.length - 1; i >= 0; i--) {
-        const bullet = bullets[i];
+    // 1. BALAS DEL JUGADOR
+    for (let i = playerBullets.length - 1; i >= 0; i--) {
+        const bullet = playerBullets[i];
         const distance = bullet.speed * deltaTime;
 
         const ray = new THREE.Raycaster(bullet.mesh.position, bullet.direction, 0, distance + 0.2);
-        const hit = ray.intersectObjects(meshes, false)[0];
+        const hit = ray.intersectObjects(allColliders, false)[0];
 
         if (hit) {
-            const item = physicalObjects.find(entry => entry.mesh === hit.object);
-            if (item) {
-                item.body.applyImpulseAtPoint({
-                    x: bullet.direction.x * bullet.force,
-                    y: bullet.direction.y * bullet.force + (bullet.force * 0.1),
-                    z: bullet.direction.z * bullet.force
-                }, hit.point, true);
+            if (enemy && enemy.alive && hit.object === enemy.mesh.children[0]) {
+                damageEnemy(bullet.damage);
+                enemy.body.applyImpulse({
+                    x: bullet.direction.x * (bullet.force * 0.2),
+                    y: 1.5,
+                    z: bullet.direction.z * (bullet.force * 0.2)
+                }, true);
+            } else {
+                const item = physicalObjects.find(entry => entry.mesh === hit.object);
+                if (item) {
+                    item.body.applyImpulseAtPoint({
+                        x: bullet.direction.x * bullet.force,
+                        y: bullet.direction.y * bullet.force + (bullet.force * 0.1),
+                        z: bullet.direction.z * bullet.force
+                    }, hit.point, true);
+                }
             }
 
             createImpact(hit.point, bullet.mesh.material.color.getHex());
             scene.remove(bullet.mesh);
-            bullets.splice(i, 1);
+            playerBullets.splice(i, 1);
             continue;
         }
 
@@ -630,14 +724,56 @@ function updateBullets(deltaTime) {
 
         if (bullet.life <= 0) {
             scene.remove(bullet.mesh);
-            bullets.splice(i, 1);
+            playerBullets.splice(i, 1);
+        }
+    }
+
+    // 2. BALAS DEL ENEMIGO (AHORA COLISIONAN CON ESCENARIO Y BLOQUES)
+    const enemyObstacles = [...dynamicMeshes, ...scenarioMeshes];
+
+    for (let i = enemyBullets.length - 1; i >= 0; i--) {
+        const bullet = enemyBullets[i];
+        const distance = bullet.speed * deltaTime;
+
+        const ray = new THREE.Raycaster(bullet.mesh.position, bullet.direction, 0, distance + 0.2);
+        const hitObject = ray.intersectObjects(enemyObstacles, false)[0];
+
+        if (hitObject) {
+            // Aplicar impulso si le pega a una forma dinámica
+            const item = physicalObjects.find(entry => entry.mesh === hitObject.object);
+            if (item) {
+                item.body.applyImpulseAtPoint({
+                    x: bullet.direction.x * 4,
+                    y: bullet.direction.y * 4,
+                    z: bullet.direction.z * 4
+                }, hitObject.point, true);
+            }
+
+            createImpact(hitObject.point, 0xef4444);
+            scene.remove(bullet.mesh);
+            enemyBullets.splice(i, 1);
+            continue;
+        }
+
+        const distToPlayer = bullet.mesh.position.distanceTo(camera.position);
+        if (distToPlayer < 0.8) {
+            damagePlayer(15);
+            createImpact(camera.position, 0xef4444);
+            scene.remove(bullet.mesh);
+            enemyBullets.splice(i, 1);
+            continue;
+        }
+
+        bullet.mesh.position.addScaledVector(bullet.direction, distance);
+        bullet.life -= deltaTime;
+
+        if (bullet.life <= 0) {
+            scene.remove(bullet.mesh);
+            enemyBullets.splice(i, 1);
         }
     }
 }
 
-/* =========================================================
-   SINCRONIZAR RAPIER CON THREE.JS
-========================================================= */
 function syncPhysics() {
     for (const item of physicalObjects) {
         const position = item.body.translation();
@@ -653,7 +789,6 @@ function syncPhysics() {
 document.addEventListener('keydown', (event) => {
     keyStates[event.code] = true;
 
-    // Teclas 1 al 5 para cambio de arma
     if (['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].includes(event.code)) {
         const num = event.code.replace('Digit', '');
         switchWeapon(parseInt(num));
@@ -675,22 +810,19 @@ document.addEventListener('mousemove', (event) => {
     camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x, -Math.PI / 2, Math.PI / 2);
 });
 
-// Disparo continuo/automático manteniéndolo presionado o único por clic
 document.addEventListener('mousedown', (event) => {
     if (event.button === 0) shoot();
 });
 
-/* =========================================================
-   ANIMACIÓN Y RESIZE
-========================================================= */
 function animate() {
     const delta = Math.min(0.033, clock.getDelta());
+    const elapsedTime = clock.getElapsedTime();
 
     controls(delta);
     updatePlayer(delta);
+    updateEnemy(elapsedTime, delta);
 
-    // Permite disparo automático para armas de cadencia alta (ej. SMG)
-    if (keyStates['Mouse0'] || (keyStates['KeyE'])) {
+    if (keyStates['Mouse0'] || keyStates['KeyE']) {
         shoot();
     }
 
